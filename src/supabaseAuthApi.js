@@ -123,3 +123,16 @@ export async function verifyEmailOtp({ email, token, type }) {
 
   return { ok: false, error: lastError || "Invalid or expired code" };
 }
+
+/** After the user proves they received our 6-digit email, mint a Supabase session server-side. */
+export async function issueSupabaseSessionForEmail(email) {
+  const generated = await adminGenerateEmailOtp(email);
+  if (!generated.ok) {
+    return { ok: false, error: generated.error || "Could not complete sign-in" };
+  }
+  return verifyEmailOtp({
+    email,
+    token: generated.code,
+    type: generated.verificationType,
+  });
+}
