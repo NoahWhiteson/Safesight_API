@@ -12,6 +12,7 @@ let filePath = null;
 let fileReady = false;
 let dbCheck = { at: 0, ok: false };
 let storeStatus = { memory: true, file: false, database: false };
+let lastDatabaseError = null;
 
 function normalizeEmail(email) {
   return String(email || "")
@@ -80,32 +81,43 @@ async function memoryAndFileSnapshot() {
   return { memory, fileObj };
 }
 
-async function canUseDbOtp() {
+async function probeDatabaseOtp(force = false) {
   const now = Date.now();
-  if (now - dbCheck.at < 30_000) return dbCheck.ok;
+  if (!force && now - dbCheck.at < 30_000) return dbCheck.ok;
 
   let ok = false;
   try {
     const admin = getSupabaseAdmin();
     const { error } = await admin.from("login_otp_codes").select("email").limit(1);
     if (error) {
-      if (/relation|does not exist|login_otp_codes/i.test(error.message || "")) {
-        console.warn(
-          "login_otp_codes table missing — run supabase/migrations/20260313000000_login_otp_codes.sql"
-        );
+      lastDatabaseError = error.message || String(error);
+      storeStatus.database = false;
+      if (/relation|does not exist|login_otp_codes|schema cache|PGRST/i.test(lastDatabaseError)) {
+        console.warn("login_otp_codes probe:", lastDatabaseError);
       } else {
-        console.warn("login_otp_codes probe:", error.message);
+        console.warn("login_otp_codes probe:", lastDatabaseError);
       }
     } else {
       ok = true;
+      lastDatabaseError = null;
       storeStatus.database = true;
     }
   } catch (err) {
-    console.warn("login_otp_codes probe failed:", err?.message || err);
+    lastDatabaseError = err?.message || String(err);
+    storeStatus.database = false;
+    console.warn("login_otp_codes probe failed:", lastDatabaseError);
   }
 
   dbCheck = { at: now, ok };
   return ok;
+}
+
+async function canUseDbOtp(force = false) {
+  return probeDatabaseOtp(force);
+}
+
+export async function refreshOtpDatabaseProbe() {
+  return probeDatabaseOtp(true);
 }
 
 async function readDbOtp(email) {
@@ -129,7 +141,9 @@ async function readDbOtp(email) {
 }
 
 export function getOtpStoreStatus() {
-  return { ...storeStatus };
+  const out = { ...storeStatus };
+  if (lastDatabaseError) out.databaseError = lastDatabaseError;
+  return out;
 }
 
 export async function initOtpStore() {
@@ -145,8 +159,9 @@ export async function initOtpStore() {
       }
     }
     if (Object.keys(fileObj).length) fileReady = true;
-    storeStatus.file = fileReady;
+    storeStatus.file = true;
   } catch (err) {
+    storeStatus.file = false;
     console.warn("OTP file store init:", err?.message || err);
   }
   await canUseDbOtp();

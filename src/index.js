@@ -9,7 +9,7 @@ import { requireAppAuth } from "./authMiddleware.js";
 import { analyzeWithGemini } from "./gemini.js";
 import { routeVideoWithGemini } from "./routeVideo.js";
 import { mountAuthOtpRoutes } from "./authOtp.js";
-import { getOtpStoreStatus, initOtpStore } from "./otpStore.js";
+import { getOtpStoreStatus, initOtpStore, refreshOtpDatabaseProbe } from "./otpStore.js";
 import { isResendConfigured } from "./resendOtpEmail.js";
 import { isSupabaseConfigured } from "./supabase.js";
 
@@ -75,16 +75,18 @@ function rateLimitAnalyze(req, res, next) {
 }
 
 app.get("/health", (_req, res) => {
-  res.json({
-    ok: true,
-    service: "safesight-api",
-    model: GEMINI_MODEL,
-    routeModel: GEMINI_ROUTE_MODEL,
-    hasKey: Boolean(GEMINI_API_KEY),
-    authRequired: Boolean(API_SECRET),
-    supabase: isSupabaseConfigured(),
-    resend: isResendConfigured(),
-    otpStore: getOtpStoreStatus(),
+  void refreshOtpDatabaseProbe().finally(() => {
+    res.json({
+      ok: true,
+      service: "safesight-api",
+      model: GEMINI_MODEL,
+      routeModel: GEMINI_ROUTE_MODEL,
+      hasKey: Boolean(GEMINI_API_KEY),
+      authRequired: Boolean(API_SECRET),
+      supabase: isSupabaseConfigured(),
+      resend: isResendConfigured(),
+      otpStore: getOtpStoreStatus(),
+    });
   });
 });
 

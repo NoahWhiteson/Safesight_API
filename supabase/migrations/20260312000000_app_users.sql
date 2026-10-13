@@ -27,3 +27,7 @@ create policy "Users read own row"
 create policy "Users update own row"
   on public.app_users for update
   using (auth.uid() = id);
+
+grant all on table public.app_users to service_role;
+
+notify pgrst, 'reload schema';

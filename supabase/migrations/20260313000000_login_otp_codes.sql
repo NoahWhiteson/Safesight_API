@@ -13,3 +13,5 @@ alter table public.login_otp_codes enable row level security;
 grant all on table public.login_otp_codes to service_role;
 
 -- No anon/authenticated policies: API uses service role only.
+
+notify pgrst, 'reload schema';
