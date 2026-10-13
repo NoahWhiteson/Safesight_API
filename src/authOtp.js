@@ -80,7 +80,7 @@ async function handleOtpSend(req, res, { clientIp }) {
       if (!bumpBucket(sendBucketsEmail, email, OTP_SEND_WINDOW_MS, OTP_SEND_MAX_PER_EMAIL)) {
         return res.status(429).json({ error: "Too many codes sent to this email. Try again later." });
       }
-      if (!bumpBucket(sendBucketsIp, ip, OTP_SEND_WINDOW_MS, OTP_SEND_MAX_IP)) {
+      if (!bumpBucket(sendBucketsIp, ip, OTP_SEND_WINDOW_MS, OTP_SEND_MAX_PER_IP)) {
         return res.status(429).json({ error: "Too many requests. Try again later." });
       }
 
