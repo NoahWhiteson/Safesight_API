@@ -78,8 +78,8 @@ function normalizeBoxUnits(sx, sy, sw, sh) {
 
 /** Prefer a tightened real box over a fake center fallback. */
 function tightenBox(sx, sy, sw, sh) {
-  const maxW = 0.52;
-  const maxH = 0.52;
+  const maxW = 0.34;
+  const maxH = 0.34;
   let x = sx;
   let y = sy;
   let w = sw;
@@ -154,9 +154,18 @@ export function sanitizeBox(box, index, total) {
     return tightenBox(sx, sy, sw, sh);
   }
 
+  const area = sw * sh;
+  if (area > 0.22) {
+    return tightenBox(sx, sy, sw, sh);
+  }
+
   sw = Math.min(sw, 1 - sx);
   sh = Math.min(sh, 1 - sy);
   if (sw < 0.012 || sh < 0.012) return fallbackBox(index, total);
+
+  if (sw * sh > 0.18) {
+    return tightenBox(sx, sy, sw, sh);
+  }
 
   // Floor tiny but real boxes so overlays stay tappable
   if (sw < 0.04) {

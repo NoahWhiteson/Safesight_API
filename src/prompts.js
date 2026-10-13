@@ -30,10 +30,11 @@ HARD RULES
    - width/height = size of the box (NOT xmax/ymax).
    - All four values are fractions of image width/height in 0…1 (example: 0.12, never 12, never 120).
    - NEVER use pixels, 0–100 percentages, 0–1000 coords, arrays, or xmax/ymax pairs.
-   - Box must tightly hug the visible hazard object — not the whole room, wall, furniture group, or frame.
-   - Typical width/height ≈ 0.05–0.35. Rarely above 0.45. Never near-full-image.
+   - Box must tightly hug the ONE physical hazard object (cord, step, outlet, candle, clutter pile) — never the whole room, wall, floor, ceiling, or large furniture piece unless that piece IS the hazard.
+   - Before finalizing each box: mentally locate the hazard’s visible pixels; x,y must be the top-left of those pixels; width/height must cover only that object.
+   - Typical width/height ≈ 0.04–0.28. Rarely above 0.35. Never above 0.42.
    - Example candle on a desk: { "x": 0.62, "y": 0.48, "width": 0.11, "height": 0.14 }
-   - If edges are fuzzy, still output your best TIGHT box — never skip, never invent a room-sized box.
+   - Wrong: a box covering >40% of image area. Wrong: center of room. If you cannot localize the hazard, lower confidence — do NOT guess a huge box.
 5. Severity: High = immediate injury/fire/egress; Medium = fix soon; Low = minor.
 6. score: 0–100 for THIS frame vs selected focus areas only.
 7. icon: short SF Symbol name (bolt.fill, figure.stairs, lightbulb.fill, etc.).
@@ -90,8 +91,10 @@ export function userPrompt({ focusAreas, dwelling, maxHazards, aggressiveness })
 Return up to ${maxHazards} distinct hazards if visible — do not stop at the first 1–2.
 
 BOUNDING BOXES: for every hazard, set boundingBox to tight top-left + width/height in 0…1 on THIS image.
-Wrong example (do not do): xmax/ymax, center coords, percentages, or a box around the whole room.
-Right example: { "x": 0.41, "y": 0.27, "width": 0.16, "height": 0.21 }
+Draw the smallest rectangle that fully contains the hazard object only.
+Wrong: xmax/ymax, center coords, percentages, room-sized boxes, or labeling a wall when the hazard is a small object on it.
+Right: { "x": 0.41, "y": 0.27, "width": 0.16, "height": 0.21 }
+Self-check: box area (width×height) should usually be under 0.12 unless the hazard truly fills a large object.
 
 Dwelling: ${home}
 
