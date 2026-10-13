@@ -1,18 +1,23 @@
 import { createSupabaseContext } from "@supabase/server";
-import { createAdminClient, resolveEnv } from "@supabase/server/core";
+import { createClient } from "@supabase/supabase-js";
+import { resolveEnv } from "@supabase/server/core";
+import { getSupabaseSecretKey, getSupabaseUrl, hasSupabaseAdminConfig } from "./supabaseKeys.js";
 
 export function isSupabaseConfigured() {
   const { data } = resolveEnv();
-  return Boolean(data?.url);
+  return Boolean(data?.url) && hasSupabaseAdminConfig();
 }
 
-/** Admin client for server-only DB (bypasses RLS). Requires SUPABASE_URL + SUPABASE_SECRET_KEY. */
+/** Admin client for server-only DB (bypasses RLS). */
 export function getSupabaseAdmin() {
-  const { data: env, error } = resolveEnv();
-  if (error) {
-    throw error;
+  const url = getSupabaseUrl();
+  const secret = getSupabaseSecretKey();
+  if (!url || !secret) {
+    throw new Error("SUPABASE_URL and SUPABASE_SECRET_KEY (or SERVICE_ROLE) required");
   }
-  return createAdminClient({ env });
+  return createClient(url, secret, {
+    auth: { persistSession: false, autoRefreshToken: false, detectSessionInUrl: false },
+  });
 }
 
 /**
