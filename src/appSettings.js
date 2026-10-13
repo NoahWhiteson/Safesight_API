@@ -1,5 +1,6 @@
 import { getSupabaseAdmin } from "./supabase.js";
-import { getAppUserById } from "./appUsers.js";
+import { adminOnlyMiddleware } from "./adminGate.js";
+import express from "express";
 
 const SETTINGS_ID = 1;
 
@@ -60,20 +61,6 @@ export async function updateGlobalSettings(admin, patch) {
   return settingsToJSON(data);
 }
 
-async function requireAdmin(req, res) {
-  if (req.authKind !== "supabase_user" || !req.supabaseCtx?.userClaims?.id) {
-    res.status(403).json({ error: "Sign in required" });
-    return null;
-  }
-  const admin = getSupabaseAdmin();
-  const row = await getAppUserById(admin, req.supabaseCtx.userClaims.id);
-  if (!row?.is_admin) {
-    res.status(403).json({ error: "Admin access required" });
-    return null;
-  }
-  return { admin, row };
-}
-
 export function mountAppSettingsRoutes(app, { requireAuth }) {
   app.get("/v1/app-config", async (_req, res) => {
     try {
@@ -85,10 +72,12 @@ export function mountAppSettingsRoutes(app, { requireAuth }) {
     }
   });
 
-  app.get("/v1/admin/settings", requireAuth, async (req, res) => {
+  const adminRouter = express.Router();
+  adminRouter.use(requireAuth);
+  adminRouter.use(adminOnlyMiddleware());
+
+  adminRouter.get("/settings", async (req, res) => {
     try {
-      const gate = await requireAdmin(req, res);
-      if (!gate) return;
       const settings = await getGlobalSettings();
       return res.json({ settings });
     } catch (err) {
@@ -96,15 +85,15 @@ export function mountAppSettingsRoutes(app, { requireAuth }) {
     }
   });
 
-  app.patch("/v1/admin/settings", requireAuth, async (req, res) => {
+  adminRouter.patch("/settings", async (req, res) => {
     try {
-      const gate = await requireAdmin(req, res);
-      if (!gate) return;
-      const settings = await updateGlobalSettings(gate.admin, req.body || {});
+      const settings = await updateGlobalSettings(req.adminCtx.admin, req.body || {});
       return res.json({ settings });
     } catch (err) {
       console.error("PATCH /v1/admin/settings:", err?.message || err);
       return res.status(502).json({ error: "Could not update settings", detail: err?.message });
     }
   });
+
+  app.use("/v1/admin", adminRouter);
 }

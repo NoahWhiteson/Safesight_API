@@ -1,20 +1,7 @@
-import { getSupabaseAdmin } from "./supabase.js";
-import { getAppUserById, profileToJSON } from "./appUsers.js";
+import { profileToJSON } from "./appUsers.js";
 import { defaultLimitsForPlan } from "./userQuotaLimits.js";
-
-async function requireAdmin(req, res) {
-  if (req.authKind !== "supabase_user" || !req.supabaseCtx?.userClaims?.id) {
-    res.status(403).json({ error: "Sign in required" });
-    return null;
-  }
-  const admin = getSupabaseAdmin();
-  const row = await getAppUserById(admin, req.supabaseCtx.userClaims.id);
-  if (!row?.is_admin) {
-    res.status(403).json({ error: "Admin access required" });
-    return null;
-  }
-  return { admin, row };
-}
+import { adminOnlyMiddleware } from "./adminGate.js";
+import express from "express";
 
 function adminPatchFromBody(body) {
   const patch = {};
@@ -37,11 +24,13 @@ function adminPatchFromBody(body) {
 }
 
 export function mountAdminRoutes(app, { requireAuth }) {
-  app.get("/v1/admin/analytics", requireAuth, async (req, res) => {
+  const router = express.Router();
+  router.use(requireAuth);
+  router.use(adminOnlyMiddleware());
+
+  router.get("/analytics", async (req, res) => {
     try {
-      const gate = await requireAdmin(req, res);
-      if (!gate) return;
-      const { admin } = gate;
+      const { admin } = req.adminCtx;
 
       const { count: userCount, error: countErr } = await admin
         .from("app_users")
@@ -77,11 +66,9 @@ export function mountAdminRoutes(app, { requireAuth }) {
     }
   });
 
-  app.get("/v1/admin/users", requireAuth, async (req, res) => {
+  router.get("/users", async (req, res) => {
     try {
-      const gate = await requireAdmin(req, res);
-      if (!gate) return;
-      const { admin } = gate;
+      const { admin } = req.adminCtx;
 
       const q = String(req.query.q || "")
         .trim()
@@ -103,11 +90,9 @@ export function mountAdminRoutes(app, { requireAuth }) {
     }
   });
 
-  app.patch("/v1/admin/users/:userId", requireAuth, async (req, res) => {
+  router.patch("/users/:userId", async (req, res) => {
     try {
-      const gate = await requireAdmin(req, res);
-      if (!gate) return;
-      const { admin } = gate;
+      const { admin } = req.adminCtx;
 
       const userId = String(req.params.userId || "").trim();
       if (!userId) return res.status(400).json({ error: "Missing user id" });
@@ -131,4 +116,6 @@ export function mountAdminRoutes(app, { requireAuth }) {
       return res.status(502).json({ error: "Could not update user" });
     }
   });
+
+  app.use("/v1/admin", router);
 }

@@ -16,12 +16,15 @@ import { mountAuthOtpRoutes } from "./authOtp.js";
 import { getOtpStoreStatus, initOtpStore, refreshOtpDatabaseProbe } from "./otpStore.js";
 import { isResendConfigured } from "./resendOtpEmail.js";
 import { AUTH_VERIFIER, isSupabaseConfigured, getSupabaseAdmin } from "./supabase.js";
+import { requireSignedInScanUser } from "./adminGate.js";
+import { createVideoScanSession } from "./videoScanSessions.js";
 import {
-  assertPhotoQuota,
-  assertVideoQuota,
-  consumePhotoScan,
-  consumeVideoScan,
-} from "./quota.js";
+  beginPhotoScan,
+  beginVideoScan,
+  scanUserFromRequest,
+  tryConsumeVideoRoomSession,
+  videoSessionIdFromAnalyzeRequest,
+} from "./scanQuota.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const PUBLIC_DIR = path.join(__dirname, "../public");
@@ -148,6 +151,7 @@ app.get(["/demovideo", "/demovideo/", "/demovideo.mp4"], sendDemoVideo);
 app.post(
   "/v1/video/route",
   requireAuth,
+  requireSignedInScanUser,
   rateLimitAnalyze,
   uploadVideoRoute.array("frames", 24),
   async (req, res) => {
@@ -155,18 +159,14 @@ app.post(
       if (!GEMINI_API_KEY) {
         return res.status(500).json({ error: "GEMINI_API_KEY not configured on server" });
       }
-      let quotaProfile = null;
-      if (req.authKind === "supabase_user" && req.supabaseCtx?.userClaims?.id) {
-        const userId = req.supabaseCtx.userClaims.id;
-        const email = req.supabaseCtx.userClaims.email || "";
-        const admin = getSupabaseAdmin();
-        const allowed = await assertVideoQuota(admin, userId, email);
-        if (!allowed.ok) {
-          return res.status(allowed.status || 429).json({
-            error: allowed.error,
-            profile: allowed.profile,
-          });
-        }
+      const user = scanUserFromRequest(req);
+      const admin = getSupabaseAdmin();
+      const consumed = await beginVideoScan(admin, user);
+      if (!consumed.ok) {
+        return res.status(consumed.status || 429).json({
+          error: consumed.error,
+          profile: consumed.profile,
+        });
       }
 
       const files = req.files || [];
@@ -180,21 +180,16 @@ app.post(
         imageBuffers: files.map((f) => f.buffer),
         maxRooms,
       });
-      if (req.authKind === "supabase_user" && req.supabaseCtx?.userClaims?.id) {
-        const userId = req.supabaseCtx.userClaims.id;
-        const email = req.supabaseCtx.userClaims.email || "";
-        const admin = getSupabaseAdmin();
-        const consumed = await consumeVideoScan(admin, userId, email);
-        if (!consumed.ok) {
-          return res.status(consumed.status || 429).json({
-            error: consumed.error,
-            profile: consumed.profile,
-          });
-        }
-        quotaProfile = consumed.profile;
-      }
 
-      res.json({ ...result, profile: quotaProfile });
+      const segmentCount = Array.isArray(result?.segments) ? result.segments.length : maxRooms;
+      const session = createVideoScanSession(user.userId, segmentCount);
+
+      res.json({
+        ...result,
+        profile: consumed.profile,
+        video_scan_session_id: session.id,
+        video_scan_session_max_rooms: session.maxRooms,
+      });
     } catch (error) {
       console.error("video route failed:", error?.message || error, error?.detail || "");
       res.status(502).json({
@@ -208,6 +203,7 @@ app.post(
 app.post(
   "/v1/analyze",
   requireAuth,
+  requireSignedInScanUser,
   rateLimitAnalyze,
   upload.single("image"),
   async (req, res) => {
@@ -230,21 +226,26 @@ app.post(
       const dwelling = meta.dwelling ?? null;
       const aggressiveness = Number(meta.aggressiveness ?? 0.55);
       const maxHazards = Number(meta.maxHazards ?? 4);
-      const billing = String(meta.billing ?? meta.billAs ?? "photo");
-      const skipPhotoQuota = billing === "video_room";
 
+      const user = scanUserFromRequest(req);
+      const admin = getSupabaseAdmin();
+      const sessionId = videoSessionIdFromAnalyzeRequest(req, meta);
       let quotaProfile = null;
-      if (req.authKind === "supabase_user" && req.supabaseCtx?.userClaims?.id && !skipPhotoQuota) {
-        const userId = req.supabaseCtx.userClaims.id;
-        const email = req.supabaseCtx.userClaims.email || "";
-        const admin = getSupabaseAdmin();
-        const allowed = await assertPhotoQuota(admin, userId, email);
-        if (!allowed.ok) {
-          return res.status(allowed.status || 429).json({
-            error: allowed.error,
-            profile: allowed.profile,
+
+      if (sessionId) {
+        const room = tryConsumeVideoRoomSession(sessionId, user.userId);
+        if (!room.ok) {
+          return res.status(room.status || 403).json({ error: room.error });
+        }
+      } else {
+        const consumed = await beginPhotoScan(admin, user);
+        if (!consumed.ok) {
+          return res.status(consumed.status || 429).json({
+            error: consumed.error,
+            profile: consumed.profile,
           });
         }
+        quotaProfile = consumed.profile;
       }
 
       const result = await analyzeWithGemini({
@@ -256,20 +257,6 @@ app.post(
         aggressiveness,
         maxHazards,
       });
-
-      if (req.authKind === "supabase_user" && req.supabaseCtx?.userClaims?.id && !skipPhotoQuota) {
-        const userId = req.supabaseCtx.userClaims.id;
-        const email = req.supabaseCtx.userClaims.email || "";
-        const admin = getSupabaseAdmin();
-        const consumed = await consumePhotoScan(admin, userId, email);
-        if (!consumed.ok) {
-          return res.status(consumed.status || 429).json({
-            error: consumed.error,
-            profile: consumed.profile,
-          });
-        }
-        quotaProfile = consumed.profile;
-      }
 
       res.json({ ...result, profile: quotaProfile });
     } catch (error) {

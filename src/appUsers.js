@@ -1,6 +1,7 @@
 import { getSupabaseAdmin } from "./supabase.js";
 import { defaultLimitsForPlan, resolvedQuotaLimits } from "./userQuotaLimits.js";
 import { healPremiumQuotaLimits } from "./quotaHeal.js";
+import { fetchRevenueCatSubscriber, isRevenueCatConfigured } from "./revenueCat.js";
 
 function currentQuotaMonthKey() {
   const now = new Date();
@@ -210,15 +211,24 @@ export function mountAppUserRoutes(app, { requireAuth }) {
       }
 
       const userId = req.supabaseCtx.userClaims.id;
-      const premium = Boolean(req.body?.premium);
       const admin = getSupabaseAdmin();
       await ensureAppUser(admin, {
         userId,
         email: req.supabaseCtx.userClaims.email || "",
       });
 
-      if (!premium) {
-        const row = await getAppUserById(admin, userId);
+      let row = await getAppUserById(admin, userId);
+
+      if (!isRevenueCatConfigured()) {
+        return res.json({ profile: profileToJSON(row) });
+      }
+
+      const rc = await fetchRevenueCatSubscriber(userId);
+      if (!rc.configured || rc.premium !== true) {
+        return res.json({ profile: profileToJSON(row) });
+      }
+
+      if (row?.plan === "premium") {
         return res.json({ profile: profileToJSON(row) });
       }
 
