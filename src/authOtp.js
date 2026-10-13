@@ -2,7 +2,7 @@ import crypto from "crypto";
 import { timingSafeEqualString } from "./authMiddleware.js";
 import { ensureAppUser, profileToJSON } from "./appUsers.js";
 import { isResendConfigured, otpExpiresMinutes, sendLoginCodeEmail } from "./resendOtpEmail.js";
-import { issueSupabaseSessionForEmail } from "./supabaseAuthApi.js";
+import { issueSupabaseSessionForEmail, refreshSupabaseSession } from "./supabaseAuthApi.js";
 import { hasSupabaseAdminConfig, hasSupabasePublishableConfig } from "./supabaseKeys.js";
 import { deletePendingOtp, loadPendingOtp, savePendingOtp, updateOtpAttempts } from "./otpStore.js";
 import { isSupabaseConfigured } from "./supabase.js";
@@ -76,6 +76,48 @@ export function mountAuthOtpRoutes(app, { clientIp }) {
         });
       }
     });
+  });
+
+  app.post("/v1/auth/session/refresh", (req, res) => {
+    void handleSessionRefresh(req, res).catch((err) => {
+      console.error("session refresh unhandled:", err?.message || err);
+      if (!res.headersSent) {
+        res.status(502).json({
+          error: "Could not refresh session",
+          detail: err?.message || "unknown",
+        });
+      }
+    });
+  });
+}
+
+async function handleSessionRefresh(req, res) {
+  if (!isSupabaseConfigured() || !hasSupabasePublishableConfig()) {
+    return res.status(503).json({ error: "Supabase not configured on server" });
+  }
+
+  const refreshToken = String(req.body?.refresh_token ?? "").trim();
+  if (!refreshToken) {
+    return res.status(400).json({ error: "Missing refresh_token" });
+  }
+
+  const refreshed = await refreshSupabaseSession(refreshToken);
+  if (!refreshed.ok || !refreshed.session) {
+    return res.status(401).json({
+      error: refreshed.error || "Session expired. Sign in again.",
+    });
+  }
+
+  const session = refreshed.session;
+  return res.json({
+    access_token: session.access_token,
+    refresh_token: session.refresh_token,
+    expires_in: session.expires_in,
+    expires_at: session.expires_at,
+    token_type: session.token_type,
+    user: session.user
+      ? { id: session.user.id, email: session.user.email }
+      : undefined,
   });
 }
 

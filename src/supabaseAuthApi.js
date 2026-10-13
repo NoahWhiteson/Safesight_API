@@ -71,6 +71,56 @@ export async function adminGenerateEmailOtp(email) {
   };
 }
 
+export async function refreshSupabaseSession(refreshToken) {
+  const url = getSupabaseUrl();
+  const apikey = getSupabasePublishableKey();
+  if (!url || !apikey) {
+    return { ok: false, error: "Supabase publishable key not configured on server" };
+  }
+  const token = String(refreshToken || "").trim();
+  if (!token) {
+    return { ok: false, error: "Missing refresh token" };
+  }
+
+  let res;
+  try {
+    res = await fetch(`${url}/auth/v1/token?grant_type=refresh_token`, {
+      method: "POST",
+      headers: {
+        apikey,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({ refresh_token: token }),
+    });
+  } catch (err) {
+    return { ok: false, error: err?.message || "Could not reach Supabase Auth" };
+  }
+
+  const body = await readJson(res);
+  if (!res.ok) {
+    return {
+      ok: false,
+      error: body?.msg || body?.message || body?.error_description || `Refresh failed (${res.status})`,
+    };
+  }
+
+  if (!body?.access_token) {
+    return { ok: false, error: "No access token returned from Supabase" };
+  }
+
+  return {
+    ok: true,
+    session: {
+      access_token: body.access_token,
+      refresh_token: body.refresh_token ?? token,
+      expires_in: body.expires_in,
+      expires_at: body.expires_at,
+      token_type: body.token_type,
+      user: body.user,
+    },
+  };
+}
+
 export async function verifyEmailOtp({ email, token, type }) {
   const url = getSupabaseUrl();
   const apikey = getSupabasePublishableKey();
