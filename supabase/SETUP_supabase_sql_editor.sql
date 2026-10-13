@@ -22,6 +22,19 @@ grant all on table public.app_global_settings to service_role;
 alter table public.app_users
   add column if not exists avatar_url text;
 
+-- 2b) Ban / suspend
+alter table public.app_users
+  add column if not exists is_banned boolean not null default false;
+
+alter table public.app_users
+  add column if not exists banned_at timestamptz;
+
+alter table public.app_users
+  add column if not exists ban_reason text;
+
+create index if not exists app_users_is_banned_idx on public.app_users (is_banned)
+  where is_banned = true;
+
 -- 3) Storage bucket (name must match API: SafesightUserIcons)
 insert into storage.buckets (id, name, public, file_size_limit, allowed_mime_types)
 values (

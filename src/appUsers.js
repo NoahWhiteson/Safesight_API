@@ -3,7 +3,7 @@ import { defaultLimitsForPlan, planQuotaPatch, resolvedQuotaLimits } from "./use
 import { healPremiumQuotaLimits } from "./quotaHeal.js";
 import { fetchRevenueCatSubscriber, isRevenueCatConfigured } from "./revenueCat.js";
 
-function currentQuotaMonthKey() {
+export function currentQuotaMonthKey() {
   const now = new Date();
   const y = now.getUTCFullYear();
   const m = String(now.getUTCMonth() + 1).padStart(2, "0");
@@ -33,6 +33,24 @@ export function profileToJSON(row) {
     photo_scans_remaining: Math.max(0, photoLimit - photoUsed),
     video_scans_remaining: Math.max(0, videoLimit - videoUsed),
     avatar_url: row.avatar_url || null,
+    is_banned: Boolean(row.is_banned),
+    banned_at: row.banned_at || null,
+    ban_reason: row.ban_reason || null,
+  };
+}
+
+export function userIsBanned(row) {
+  return Boolean(row?.is_banned);
+}
+
+export function bannedUserResponse(row) {
+  return {
+    ok: false,
+    status: 403,
+    error:
+      row?.ban_reason?.trim() ||
+      "Your account has been suspended. Contact support if you think this is a mistake.",
+    profile: profileToJSON(row),
   };
 }
 
