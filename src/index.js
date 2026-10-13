@@ -1,6 +1,7 @@
 import "dotenv/config";
 import cors from "cors";
 import express from "express";
+import { mountAdminRoutes } from "./adminRoutes.js";
 import { mountAppUserRoutes } from "./appUsers.js";
 import multer from "multer";
 import path from "path";
@@ -98,6 +99,7 @@ app.get("/health", (_req, res) => {
 
 mountAuthOtpRoutes(app, { clientIp });
 mountAppUserRoutes(app, { requireAuth });
+mountAdminRoutes(app, { requireAuth });
 
 /** Product demo MP4 at /demovideo (and /demovideo.mp4). */
 function sendDemoVideo(req, res) {

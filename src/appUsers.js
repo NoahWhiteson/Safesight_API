@@ -15,6 +15,7 @@ export function profileToJSON(row) {
   const photoUsed = Number(row.photo_scans_used ?? 0);
   const videoUsed = Number(row.video_scans_used ?? 0);
   return {
+    id: row.id,
     email: row.email,
     plan: row.plan,
     is_admin: Boolean(row.is_admin),
@@ -116,21 +117,6 @@ export async function updateAppUserProfile(admin, userId, patch) {
   if (patch.onboarding_complete !== undefined) {
     allowed.onboarding_complete = Boolean(patch.onboarding_complete);
   }
-  if (patch.plan !== undefined && ["free", "premium"].includes(patch.plan)) {
-    allowed.plan = patch.plan;
-    const limits = defaultLimitsForPlan(patch.plan);
-    allowed.photo_quota_limit = limits.photo_quota_limit;
-    allowed.video_quota_limit = limits.video_quota_limit;
-  }
-  if (patch.photo_quota_limit !== undefined) {
-    const n = Number(patch.photo_quota_limit);
-    if (Number.isFinite(n) && n >= 0) allowed.photo_quota_limit = Math.floor(n);
-  }
-  if (patch.video_quota_limit !== undefined) {
-    const n = Number(patch.video_quota_limit);
-    if (Number.isFinite(n) && n >= 0) allowed.video_quota_limit = Math.floor(n);
-  }
-
   allowed.updated_at = new Date().toISOString();
 
   const { data, error } = await admin
@@ -170,6 +156,42 @@ export function mountAppUserRoutes(app, { requireAuth }) {
     } catch (err) {
       console.error("GET /v1/me failed:", err?.message || err);
       return res.status(502).json({ error: "Could not load profile" });
+    }
+  });
+
+  app.post("/v1/me/subscription-sync", requireAuth, async (req, res) => {
+    try {
+      if (req.authKind !== "supabase_user" || !req.supabaseCtx?.userClaims?.id) {
+        return res.status(403).json({ error: "Sign in required" });
+      }
+
+      const userId = req.supabaseCtx.userClaims.id;
+      const premium = Boolean(req.body?.premium);
+      const plan = premium ? "premium" : "free";
+      const limits = defaultLimitsForPlan(plan);
+      const admin = getSupabaseAdmin();
+      await ensureAppUser(admin, {
+        userId,
+        email: req.supabaseCtx.userClaims.email || "",
+      });
+
+      const { data, error } = await admin
+        .from("app_users")
+        .update({
+          plan,
+          photo_quota_limit: limits.photo_quota_limit,
+          video_quota_limit: limits.video_quota_limit,
+          updated_at: new Date().toISOString(),
+        })
+        .eq("id", userId)
+        .select("*")
+        .single();
+      if (error) throw error;
+
+      return res.json({ profile: profileToJSON(data) });
+    } catch (err) {
+      console.error("subscription-sync failed:", err?.message || err);
+      return res.status(502).json({ error: "Could not sync subscription" });
     }
   });
 
