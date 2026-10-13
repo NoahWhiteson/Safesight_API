@@ -136,30 +136,68 @@ export async function updateAppUserProfile(admin, userId, patch) {
 
 export function mountAppUserRoutes(app, { requireAuth }) {
   app.get("/v1/me", requireAuth, async (req, res) => {
+    const debug = { step: "start" };
     try {
+      debug.auth_kind = req.authKind || "unknown";
       if (req.authKind !== "supabase_user" || !req.supabaseCtx?.userClaims?.id) {
-        return res.json({ auth: "legacy_app_secret" });
+        debug.step = "legacy_or_missing_jwt";
+        debug.hint =
+          "Bearer must be a Supabase access JWT (3 segments). Legacy API secret returns no profile.";
+        console.warn("GET /v1/me:", debug);
+        return res.json({ auth: "legacy_app_secret", debug });
       }
 
       const userId = req.supabaseCtx.userClaims.id;
+      debug.auth_user_id = userId;
+      debug.auth_email = req.supabaseCtx.userClaims.email || null;
+
       const admin = getSupabaseAdmin();
+      debug.step = "load_row";
       let row = await getAppUserById(admin, userId);
+      debug.row_found = Boolean(row);
       if (!row) {
+        debug.step = "ensure_app_user";
         const email = req.supabaseCtx.userClaims.email || "";
         row = await ensureAppUser(admin, { userId, email });
+        debug.row_created = true;
       }
 
+      debug.row_plan = row?.plan;
+      debug.row_is_admin = Boolean(row?.is_admin);
+      debug.row_email = row?.email;
+
       const { id, email, role } = req.supabaseCtx.userClaims;
-      return res.json({
+      const payload = {
         id,
         email,
         role,
         auth: "supabase_user",
         profile: profileToJSON(row),
+        debug,
+      };
+      console.log("GET /v1/me ok", {
+        userId: id,
+        plan: row?.plan,
+        is_admin: row?.is_admin,
       });
+      return res.json(payload);
     } catch (err) {
-      console.error("GET /v1/me failed:", err?.message || err);
-      return res.status(502).json({ error: "Could not load profile" });
+      debug.step = "error";
+      debug.message = err?.message || String(err);
+      console.error("GET /v1/me failed:", debug);
+      const msg = String(err?.message || err || "");
+      if (/relation|app_users|does not exist|photo_quota_limit|schema cache/i.test(msg)) {
+        return res.status(503).json({
+          error: "Server database not ready (run app_users migration in Supabase).",
+          detail: msg,
+          debug,
+        });
+      }
+      return res.status(502).json({
+        error: "Could not load profile",
+        detail: msg,
+        debug,
+      });
     }
   });
 
