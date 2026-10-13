@@ -1,12 +1,16 @@
 import "dotenv/config";
 import cors from "cors";
-import crypto from "crypto";
 import express from "express";
+import { mountAppUserRoutes } from "./appUsers.js";
 import multer from "multer";
 import path from "path";
 import { fileURLToPath } from "url";
+import { requireAppAuth } from "./authMiddleware.js";
 import { analyzeWithGemini } from "./gemini.js";
 import { routeVideoWithGemini } from "./routeVideo.js";
+import { mountAuthOtpRoutes } from "./authOtp.js";
+import { isResendConfigured } from "./resendOtpEmail.js";
+import { isSupabaseConfigured } from "./supabase.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const PUBLIC_DIR = path.join(__dirname, "../public");
@@ -35,6 +39,7 @@ const uploadVideoRoute = multer({
 const app = express();
 app.use(cors());
 app.use(express.json({ limit: "1mb" }));
+app.use(express.static(PUBLIC_DIR));
 
 const rateBuckets = new Map();
 
@@ -46,32 +51,7 @@ function clientIp(req) {
   return req.socket.remoteAddress || "unknown";
 }
 
-function timingSafeEqualString(a, b) {
-  const left = Buffer.from(String(a));
-  const right = Buffer.from(String(b));
-  if (left.length !== right.length) {
-    // Still run a compare to keep timing flatter on length mismatch.
-    crypto.timingSafeEqual(left, Buffer.alloc(left.length));
-    return false;
-  }
-  return crypto.timingSafeEqual(left, right);
-}
-
-function requireApiSecret(req, res, next) {
-  if (!API_SECRET) {
-    return res.status(500).json({ error: "SAFESIGHT_API_SECRET not configured on server" });
-  }
-
-  const auth = req.get("authorization") || "";
-  const bearer = auth.match(/^Bearer\s+(.+)$/i)?.[1]?.trim() || "";
-  const headerKey = (req.get("x-safesight-key") || "").trim();
-  const provided = bearer || headerKey;
-
-  if (!provided || !timingSafeEqualString(provided, API_SECRET)) {
-    return res.status(401).json({ error: "Unauthorized" });
-  }
-  return next();
-}
+const requireAuth = requireAppAuth(API_SECRET);
 
 function rateLimitAnalyze(req, res, next) {
   const ip = clientIp(req);
@@ -101,8 +81,13 @@ app.get("/health", (_req, res) => {
     routeModel: GEMINI_ROUTE_MODEL,
     hasKey: Boolean(GEMINI_API_KEY),
     authRequired: Boolean(API_SECRET),
+    supabase: isSupabaseConfigured(),
+    resend: isResendConfigured(),
   });
 });
+
+mountAuthOtpRoutes(app, { clientIp });
+mountAppUserRoutes(app, { requireAuth });
 
 /** Product demo MP4 at /demovideo (and /demovideo.mp4). */
 function sendDemoVideo(req, res) {
@@ -132,7 +117,7 @@ app.get(["/demovideo", "/demovideo/", "/demovideo.mp4"], sendDemoVideo);
  */
 app.post(
   "/v1/video/route",
-  requireApiSecret,
+  requireAuth,
   rateLimitAnalyze,
   uploadVideoRoute.array("frames", 24),
   async (req, res) => {
@@ -164,7 +149,7 @@ app.post(
 
 app.post(
   "/v1/analyze",
-  requireApiSecret,
+  requireAuth,
   rateLimitAnalyze,
   upload.single("image"),
   async (req, res) => {
