@@ -1,5 +1,5 @@
 import { profileToJSON } from "./appUsers.js";
-import { defaultLimitsForPlan } from "./userQuotaLimits.js";
+import { defaultLimitsForPlan, planQuotaPatch } from "./userQuotaLimits.js";
 import { adminOnlyMiddleware } from "./adminGate.js";
 import express from "express";
 
@@ -7,10 +7,7 @@ function adminPatchFromBody(body) {
   const patch = {};
   const src = body || {};
   if (src.plan !== undefined && ["free", "premium"].includes(src.plan)) {
-    patch.plan = src.plan;
-    const limits = defaultLimitsForPlan(src.plan);
-    patch.photo_quota_limit = limits.photo_quota_limit;
-    patch.video_quota_limit = limits.video_quota_limit;
+    Object.assign(patch, planQuotaPatch(src.plan));
   }
   for (const key of ["photo_quota_limit", "video_quota_limit", "photo_scans_used", "video_scans_used"]) {
     if (src[key] !== undefined) {

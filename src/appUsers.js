@@ -1,5 +1,5 @@
 import { getSupabaseAdmin } from "./supabase.js";
-import { defaultLimitsForPlan, resolvedQuotaLimits } from "./userQuotaLimits.js";
+import { defaultLimitsForPlan, planQuotaPatch, resolvedQuotaLimits } from "./userQuotaLimits.js";
 import { healPremiumQuotaLimits } from "./quotaHeal.js";
 import { fetchRevenueCatSubscriber, isRevenueCatConfigured } from "./revenueCat.js";
 
@@ -224,23 +224,24 @@ export function mountAppUserRoutes(app, { requireAuth }) {
       }
 
       const rc = await fetchRevenueCatSubscriber(userId);
-      if (!rc.configured || rc.premium !== true) {
+      if (!rc.configured) {
         return res.json({ profile: profileToJSON(row) });
       }
 
-      if (row?.plan === "premium") {
+      const targetPlan = rc.premium === true ? "premium" : "free";
+      const limits = defaultLimitsForPlan(targetPlan);
+      const alreadySynced =
+        row?.plan === targetPlan &&
+        Number(row?.photo_quota_limit) === limits.photo_quota_limit &&
+        Number(row?.video_quota_limit) === limits.video_quota_limit;
+
+      if (alreadySynced) {
         return res.json({ profile: profileToJSON(row) });
       }
 
-      const limits = defaultLimitsForPlan("premium");
       const { data, error } = await admin
         .from("app_users")
-        .update({
-          plan: "premium",
-          photo_quota_limit: limits.photo_quota_limit,
-          video_quota_limit: limits.video_quota_limit,
-          updated_at: new Date().toISOString(),
-        })
+        .update(planQuotaPatch(targetPlan))
         .eq("id", userId)
         .select("*")
         .single();

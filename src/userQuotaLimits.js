@@ -5,6 +5,18 @@ export function defaultLimitsForPlan(plan) {
   return { photo_quota_limit: 2, video_quota_limit: 0 };
 }
 
+/** DB patch when plan changes (subscription sync or admin). */
+export function planQuotaPatch(plan) {
+  const normalized = plan === "premium" ? "premium" : "free";
+  const limits = defaultLimitsForPlan(normalized);
+  return {
+    plan: normalized,
+    photo_quota_limit: limits.photo_quota_limit,
+    video_quota_limit: limits.video_quota_limit,
+    updated_at: new Date().toISOString(),
+  };
+}
+
 export function effectivePhotoLimit(row) {
   const n = Number(row?.photo_quota_limit);
   if (Number.isFinite(n) && n >= 0) return n;

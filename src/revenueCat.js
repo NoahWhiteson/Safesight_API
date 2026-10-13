@@ -1,3 +1,5 @@
+// RevenueCat REST API v1 — subscriber lookup with the Secret API key (recommended for server entitlement checks).
+// https://www.revenuecat.com/docs/api-v1#tag/customers/operation/subscribers
 const ENTITLEMENT_ID = (process.env.REVENUECAT_ENTITLEMENT_ID || "safesight_pro").trim();
 
 export function isRevenueCatConfigured() {
