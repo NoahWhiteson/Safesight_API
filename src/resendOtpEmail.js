@@ -1,5 +1,3 @@
-import { Resend } from "resend";
-
 const RESEND_API_KEY = (process.env.RESEND_API_KEY || "").trim();
 const RESEND_FROM =
   (process.env.RESEND_FROM || "Safesight <noreply@safesight.app>").trim();
@@ -11,20 +9,8 @@ const PUBLIC_ORIGIN = (
 
 const OTP_EXPIRES_MINUTES = 5;
 
-let resendClient = null;
-
 export function isResendConfigured() {
   return Boolean(RESEND_API_KEY);
-}
-
-function getResend() {
-  if (!RESEND_API_KEY) {
-    throw new Error("RESEND_API_KEY not configured");
-  }
-  if (!resendClient) {
-    resendClient = new Resend(RESEND_API_KEY);
-  }
-  return resendClient;
 }
 
 export function otpExpiresMinutes() {
@@ -32,7 +18,9 @@ export function otpExpiresMinutes() {
 }
 
 export async function sendLoginCodeEmail({ to, code }) {
-  const resend = getResend();
+  if (!RESEND_API_KEY) {
+    throw new Error("RESEND_API_KEY not configured");
+  }
   const logoUrl = `${PUBLIC_ORIGIN}/logo.png`;
   const digits = String(code).split("");
 
@@ -43,11 +31,17 @@ export async function sendLoginCodeEmail({ to, code }) {
     )
     .join('<td style="width:8px;"></td>');
 
-  const { data, error } = await resend.emails.send({
-    from: RESEND_FROM,
-    to: [to],
-    subject: `${code} · Safesight sign-in code`,
-    html: `<!DOCTYPE html>
+  const res = await fetch("https://api.resend.com/emails", {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${RESEND_API_KEY}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      from: RESEND_FROM,
+      to: [to],
+      subject: `${code} · Safesight sign-in code`,
+      html: `<!DOCTYPE html>
 <html lang="en">
 <head>
   <meta charset="utf-8">
@@ -86,13 +80,14 @@ export async function sendLoginCodeEmail({ to, code }) {
   </table>
 </body>
 </html>`,
-    text: `Your Safesight sign-in code is ${code}. It expires in ${OTP_EXPIRES_MINUTES} minutes.`,
+      text: `Your Safesight sign-in code is ${code}. It expires in ${OTP_EXPIRES_MINUTES} minutes.`,
+    }),
   });
 
-  if (error) {
-    const err = new Error(error.message || "Resend send failed");
-    err.detail = error;
-    throw err;
+  const body = await res.json().catch(async () => ({ message: await res.text() }));
+  if (!res.ok) {
+    const msg = body?.message || body?.error || `Resend HTTP ${res.status}`;
+    throw new Error(msg);
   }
-  return data;
+  return body;
 }
