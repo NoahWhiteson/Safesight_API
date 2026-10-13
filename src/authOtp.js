@@ -37,7 +37,32 @@ function bumpBucket(map, key, windowMs, max) {
 }
 
 export function mountAuthOtpRoutes(app, { clientIp }) {
-  app.post("/v1/auth/otp/send", async (req, res) => {
+  app.post("/v1/auth/otp/send", (req, res) => {
+    void handleOtpSend(req, res, { clientIp }).catch((err) => {
+      console.error("otp send unhandled:", err?.message || err);
+      if (!res.headersSent) {
+        res.status(502).json({
+          error: "Could not send sign-in code",
+          detail: err?.message || "unknown",
+        });
+      }
+    });
+  });
+
+  app.post("/v1/auth/otp/verify", (req, res) => {
+    void handleOtpVerify(req, res).catch((err) => {
+      console.error("otp verify unhandled:", err?.message || err);
+      if (!res.headersSent) {
+        res.status(502).json({
+          error: "Could not verify code",
+          detail: err?.message || "unknown",
+        });
+      }
+    });
+  });
+}
+
+async function handleOtpSend(req, res, { clientIp }) {
     try {
       if (!isSupabaseConfigured() || !hasSupabaseAdminConfig()) {
         return res.status(503).json({ error: "Supabase not configured on server" });
@@ -82,9 +107,9 @@ export function mountAuthOtpRoutes(app, { clientIp }) {
         detail: err?.message || "unknown",
       });
     }
-  });
+}
 
-  app.post("/v1/auth/otp/verify", async (req, res) => {
+async function handleOtpVerify(req, res) {
     try {
       if (!isSupabaseConfigured() || !hasSupabasePublishableConfig()) {
         return res.status(503).json({ error: "Supabase not configured on server" });
@@ -145,5 +170,4 @@ export function mountAuthOtpRoutes(app, { clientIp }) {
         detail: err?.message || "unknown",
       });
     }
-  });
 }

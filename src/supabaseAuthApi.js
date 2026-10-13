@@ -23,7 +23,9 @@ export async function adminGenerateEmailOtp(email) {
 
   let lastError = null;
   for (const type of ["magiclink", "signup"]) {
-    const res = await fetch(`${url}/auth/v1/admin/generate_link`, {
+    let res;
+    try {
+      res = await fetch(`${url}/auth/v1/admin/generate_link`, {
       method: "POST",
       headers: {
         Authorization: `Bearer ${secret}`,
@@ -31,7 +33,10 @@ export async function adminGenerateEmailOtp(email) {
         "Content-Type": "application/json",
       },
       body: JSON.stringify({ type, email }),
-    });
+      });
+    } catch (networkErr) {
+      return { ok: false, error: networkErr?.message || "Could not reach Supabase Auth" };
+    }
     const body = await readJson(res);
     if (!res.ok) {
       lastError = body?.msg || body?.message || body?.error_description || `Supabase ${res.status}`;
