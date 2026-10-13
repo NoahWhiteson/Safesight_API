@@ -4,6 +4,7 @@ import { ensureAppUser, profileToJSON } from "./appUsers.js";
 import { isResendConfigured, otpExpiresMinutes, sendLoginCodeEmail } from "./resendOtpEmail.js";
 import { issueSupabaseSessionForEmail } from "./supabaseAuthApi.js";
 import { hasSupabaseAdminConfig, hasSupabasePublishableConfig } from "./supabaseKeys.js";
+import { deletePendingOtp, loadPendingOtp, savePendingOtp, updateOtpAttempts } from "./otpStore.js";
 import { isSupabaseConfigured } from "./supabase.js";
 
 const OTP_SEND_WINDOW_MS = 15 * 60 * 1000;
@@ -11,9 +12,6 @@ const OTP_SEND_MAX_PER_EMAIL = 3;
 const OTP_SEND_MAX_PER_IP = 12;
 const OTP_CODE_TTL_MS = otpExpiresMinutes() * 60 * 1000;
 const OTP_MAX_ATTEMPTS = 8;
-
-/** email -> { codeHash, expiresAt, attempts } */
-const pendingVerification = new Map();
 
 const sendBucketsEmail = new Map();
 const sendBucketsIp = new Map();
@@ -104,7 +102,7 @@ async function handleOtpSend(req, res, { clientIp }) {
     }
 
     const code = generateSixDigitCode();
-    pendingVerification.set(email, {
+    await savePendingOtp(email, {
       codeHash: hashOtpCode(code),
       expiresAt: Date.now() + OTP_CODE_TTL_MS,
       attempts: 0,
@@ -124,7 +122,7 @@ async function handleOtpSend(req, res, { clientIp }) {
 
 async function handleOtpVerify(req, res) {
   try {
-    if (!isSupabaseConfigured() || !hasSupabasePublishableConfig()) {
+    if (!isSupabaseConfigured() || !hasSupabasePublishableConfig() || !hasSupabaseAdminConfig()) {
       return res.status(503).json({ error: "Supabase not configured on server" });
     }
 
@@ -139,18 +137,22 @@ async function handleOtpVerify(req, res) {
       return res.status(400).json({ error: "Invalid code" });
     }
 
-    const pending = pendingVerification.get(email);
+    const pending = await loadPendingOtp(email);
     if (!pending) {
-      return res.status(400).json({ error: "Code expired. Request a new one." });
+      return res.status(400).json({
+        error: "Code expired. Request a new one.",
+        detail: "No pending code for this email on the server (send again after deploy or redeploy).",
+      });
     }
     if (Date.now() > pending.expiresAt) {
-      pendingVerification.delete(email);
+      await deletePendingOtp(email);
       return res.status(400).json({ error: "Code expired. Request a new one." });
     }
 
-    pending.attempts += 1;
-    if (pending.attempts > OTP_MAX_ATTEMPTS) {
-      pendingVerification.delete(email);
+    const nextAttempts = pending.attempts + 1;
+    await updateOtpAttempts(email, nextAttempts);
+    if (nextAttempts > OTP_MAX_ATTEMPTS) {
+      await deletePendingOtp(email);
       return res.status(429).json({ error: "Too many attempts. Request a new code." });
     }
 
@@ -160,7 +162,7 @@ async function handleOtpVerify(req, res) {
       return res.status(401).json({ error: "Invalid or expired code" });
     }
 
-    pendingVerification.delete(email);
+    await deletePendingOtp(email);
 
     const verified = await issueSupabaseSessionForEmail(email);
     if (!verified.ok || !verified.session) {
@@ -172,11 +174,27 @@ async function handleOtpVerify(req, res) {
     const session = verified.session;
     const user = session.user;
     const { getSupabaseAdmin } = await import("./supabase.js");
-    const admin = getSupabaseAdmin();
-    const appUser = await ensureAppUser(admin, {
-      userId: user.id,
-      email: user.email || email,
-    });
+    let appUser = null;
+    try {
+      const admin = getSupabaseAdmin();
+      appUser = await ensureAppUser(admin, {
+        userId: user.id,
+        email: user.email || email,
+      });
+    } catch (dbErr) {
+      console.error("ensureAppUser failed:", dbErr?.message || dbErr);
+      const msg = String(dbErr?.message || dbErr || "");
+      if (/relation|app_users|does not exist/i.test(msg)) {
+        return res.status(503).json({
+          error: "Server database not ready (run app_users migration in Supabase).",
+          detail: msg,
+        });
+      }
+      return res.status(502).json({
+        error: "Could not load profile after sign-in",
+        detail: msg,
+      });
+    }
 
     return res.json({
       access_token: session.access_token,

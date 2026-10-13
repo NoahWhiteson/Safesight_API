@@ -9,6 +9,7 @@ import { requireAppAuth } from "./authMiddleware.js";
 import { analyzeWithGemini } from "./gemini.js";
 import { routeVideoWithGemini } from "./routeVideo.js";
 import { mountAuthOtpRoutes } from "./authOtp.js";
+import { getOtpStoreStatus, initOtpStore } from "./otpStore.js";
 import { isResendConfigured } from "./resendOtpEmail.js";
 import { isSupabaseConfigured } from "./supabase.js";
 
@@ -83,6 +84,7 @@ app.get("/health", (_req, res) => {
     authRequired: Boolean(API_SECRET),
     supabase: isSupabaseConfigured(),
     resend: isResendConfigured(),
+    otpStore: getOtpStoreStatus(),
   });
 });
 
@@ -194,12 +196,14 @@ app.post(
   }
 );
 
-app.listen(PORT, "0.0.0.0", () => {
-  console.log(`Safesight API listening on http://0.0.0.0:${PORT}`);
-  if (!GEMINI_API_KEY) {
-    console.warn("Warning: GEMINI_API_KEY is empty — set it in server/.env");
-  }
-  if (!API_SECRET) {
-    console.warn("Warning: SAFESIGHT_API_SECRET is empty — /v1/analyze will reject all requests");
-  }
+void initOtpStore().then(() => {
+  app.listen(PORT, "0.0.0.0", () => {
+    console.log(`Safesight API listening on http://0.0.0.0:${PORT}`);
+    if (!GEMINI_API_KEY) {
+      console.warn("Warning: GEMINI_API_KEY is empty — set it in server/.env");
+    }
+    if (!API_SECRET) {
+      console.warn("Warning: SAFESIGHT_API_SECRET is empty — /v1/analyze will reject all requests");
+    }
+  });
 });
