@@ -11,7 +11,13 @@ import { routeVideoWithGemini } from "./routeVideo.js";
 import { mountAuthOtpRoutes } from "./authOtp.js";
 import { getOtpStoreStatus, initOtpStore, refreshOtpDatabaseProbe } from "./otpStore.js";
 import { isResendConfigured } from "./resendOtpEmail.js";
-import { isSupabaseConfigured } from "./supabase.js";
+import { isSupabaseConfigured, getSupabaseAdmin } from "./supabase.js";
+import {
+  assertPhotoQuota,
+  assertVideoQuota,
+  consumePhotoScan,
+  consumeVideoScan,
+} from "./quota.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const PUBLIC_DIR = path.join(__dirname, "../public");
@@ -129,6 +135,20 @@ app.post(
       if (!GEMINI_API_KEY) {
         return res.status(500).json({ error: "GEMINI_API_KEY not configured on server" });
       }
+      let quotaProfile = null;
+      if (req.authKind === "supabase_user" && req.supabaseCtx?.userClaims?.id) {
+        const userId = req.supabaseCtx.userClaims.id;
+        const email = req.supabaseCtx.userClaims.email || "";
+        const admin = getSupabaseAdmin();
+        const allowed = await assertVideoQuota(admin, userId, email);
+        if (!allowed.ok) {
+          return res.status(allowed.status || 429).json({
+            error: allowed.error,
+            profile: allowed.profile,
+          });
+        }
+      }
+
       const files = req.files || [];
       if (!files.length) {
         return res.status(400).json({ error: "Missing frame images" });
@@ -140,7 +160,21 @@ app.post(
         imageBuffers: files.map((f) => f.buffer),
         maxRooms,
       });
-      res.json(result);
+      if (req.authKind === "supabase_user" && req.supabaseCtx?.userClaims?.id) {
+        const userId = req.supabaseCtx.userClaims.id;
+        const email = req.supabaseCtx.userClaims.email || "";
+        const admin = getSupabaseAdmin();
+        const consumed = await consumeVideoScan(admin, userId, email);
+        if (!consumed.ok) {
+          return res.status(consumed.status || 429).json({
+            error: consumed.error,
+            profile: consumed.profile,
+          });
+        }
+        quotaProfile = consumed.profile;
+      }
+
+      res.json({ ...result, profile: quotaProfile });
     } catch (error) {
       console.error("video route failed:", error?.message || error, error?.detail || "");
       res.status(502).json({
@@ -176,6 +210,22 @@ app.post(
       const dwelling = meta.dwelling ?? null;
       const aggressiveness = Number(meta.aggressiveness ?? 0.55);
       const maxHazards = Number(meta.maxHazards ?? 4);
+      const billing = String(meta.billing ?? meta.billAs ?? "photo");
+      const skipPhotoQuota = billing === "video_room";
+
+      let quotaProfile = null;
+      if (req.authKind === "supabase_user" && req.supabaseCtx?.userClaims?.id && !skipPhotoQuota) {
+        const userId = req.supabaseCtx.userClaims.id;
+        const email = req.supabaseCtx.userClaims.email || "";
+        const admin = getSupabaseAdmin();
+        const allowed = await assertPhotoQuota(admin, userId, email);
+        if (!allowed.ok) {
+          return res.status(allowed.status || 429).json({
+            error: allowed.error,
+            profile: allowed.profile,
+          });
+        }
+      }
 
       const result = await analyzeWithGemini({
         apiKey: GEMINI_API_KEY,
@@ -187,7 +237,21 @@ app.post(
         maxHazards,
       });
 
-      res.json(result);
+      if (req.authKind === "supabase_user" && req.supabaseCtx?.userClaims?.id && !skipPhotoQuota) {
+        const userId = req.supabaseCtx.userClaims.id;
+        const email = req.supabaseCtx.userClaims.email || "";
+        const admin = getSupabaseAdmin();
+        const consumed = await consumePhotoScan(admin, userId, email);
+        if (!consumed.ok) {
+          return res.status(consumed.status || 429).json({
+            error: consumed.error,
+            profile: consumed.profile,
+          });
+        }
+        quotaProfile = consumed.profile;
+      }
+
+      res.json({ ...result, profile: quotaProfile });
     } catch (error) {
       console.error("analyze failed:", error?.message || error, error?.detail || "");
       res.status(502).json({

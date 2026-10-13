@@ -1,4 +1,5 @@
 import { getSupabaseAdmin } from "./supabase.js";
+import { defaultLimitsForPlan, effectivePhotoLimit, effectiveVideoLimit } from "./userQuotaLimits.js";
 
 function currentQuotaMonthKey() {
   const now = new Date();
@@ -9,6 +10,10 @@ function currentQuotaMonthKey() {
 
 export function profileToJSON(row) {
   if (!row) return null;
+  const photoLimit = effectivePhotoLimit(row);
+  const videoLimit = effectiveVideoLimit(row);
+  const photoUsed = Number(row.photo_scans_used ?? 0);
+  const videoUsed = Number(row.video_scans_used ?? 0);
   return {
     email: row.email,
     plan: row.plan,
@@ -18,9 +23,13 @@ export function profileToJSON(row) {
     dwelling_raw: row.dwelling_raw,
     hazard_raws: Array.isArray(row.hazard_raws) ? row.hazard_raws : [],
     scan_aggressiveness: Number(row.scan_aggressiveness ?? 0.55),
-    photo_scans_used: Number(row.photo_scans_used ?? 0),
-    video_scans_used: Number(row.video_scans_used ?? 0),
+    photo_scans_used: photoUsed,
+    video_scans_used: videoUsed,
     quota_month_key: row.quota_month_key,
+    photo_quota_limit: photoLimit,
+    video_quota_limit: videoLimit,
+    photo_scans_remaining: Math.max(0, photoLimit - photoUsed),
+    video_scans_remaining: Math.max(0, videoLimit - videoUsed),
   };
 }
 
@@ -62,12 +71,16 @@ export async function ensureAppUser(admin, { userId, email }) {
     return maybeRollQuotaMonth(admin, existing);
   }
 
+  const plan = "free";
+  const limits = defaultLimitsForPlan(plan);
   const insertRow = {
     id: userId,
     email: normalized,
-    plan: "free",
+    plan,
     photo_scans_used: 0,
     video_scans_used: 0,
+    photo_quota_limit: limits.photo_quota_limit,
+    video_quota_limit: limits.video_quota_limit,
     quota_month_key: currentQuotaMonthKey(),
     hazard_raws: [],
     scan_aggressiveness: 0.55,
@@ -105,6 +118,17 @@ export async function updateAppUserProfile(admin, userId, patch) {
   }
   if (patch.plan !== undefined && ["free", "premium"].includes(patch.plan)) {
     allowed.plan = patch.plan;
+    const limits = defaultLimitsForPlan(patch.plan);
+    allowed.photo_quota_limit = limits.photo_quota_limit;
+    allowed.video_quota_limit = limits.video_quota_limit;
+  }
+  if (patch.photo_quota_limit !== undefined) {
+    const n = Number(patch.photo_quota_limit);
+    if (Number.isFinite(n) && n >= 0) allowed.photo_quota_limit = Math.floor(n);
+  }
+  if (patch.video_quota_limit !== undefined) {
+    const n = Number(patch.video_quota_limit);
+    if (Number.isFinite(n) && n >= 0) allowed.video_quota_limit = Math.floor(n);
   }
 
   allowed.updated_at = new Date().toISOString();
