@@ -228,20 +228,24 @@ export function mountAppUserRoutes(app, { requireAuth }) {
         return res.json({ profile: profileToJSON(row) });
       }
 
-      const targetPlan = rc.premium === true ? "premium" : "free";
-      const limits = defaultLimitsForPlan(targetPlan);
-      const alreadySynced =
-        row?.plan === targetPlan &&
+      // Only upgrade from RevenueCat — never downgrade (admin grants & lapses stay until admin/RC webhook).
+      if (rc.premium !== true) {
+        return res.json({ profile: profileToJSON(row) });
+      }
+
+      const limits = defaultLimitsForPlan("premium");
+      const alreadyPremium =
+        row?.plan === "premium" &&
         Number(row?.photo_quota_limit) === limits.photo_quota_limit &&
         Number(row?.video_quota_limit) === limits.video_quota_limit;
 
-      if (alreadySynced) {
+      if (alreadyPremium) {
         return res.json({ profile: profileToJSON(row) });
       }
 
       const { data, error } = await admin
         .from("app_users")
-        .update(planQuotaPatch(targetPlan))
+        .update(planQuotaPatch("premium"))
         .eq("id", userId)
         .select("*")
         .single();
