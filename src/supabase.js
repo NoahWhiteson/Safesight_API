@@ -1,7 +1,16 @@
 import { createSupabaseContext } from "@supabase/server";
 import { createClient } from "@supabase/supabase-js";
 import { resolveEnv } from "@supabase/server/core";
+import ws from "ws";
 import { getSupabaseSecretKey, getSupabaseUrl, hasSupabaseAdminConfig } from "./supabaseKeys.js";
+
+/** Node 18–21: supabase-js needs an explicit WebSocket transport for Realtime init. */
+export function createServiceSupabaseClient(url, key) {
+  return createClient(url, key, {
+    auth: { persistSession: false, autoRefreshToken: false, detectSessionInUrl: false },
+    realtime: { transport: ws },
+  });
+}
 
 export function isSupabaseConfigured() {
   const { data } = resolveEnv();
@@ -15,9 +24,7 @@ export function getSupabaseAdmin() {
   if (!url || !secret) {
     throw new Error("SUPABASE_URL and SUPABASE_SECRET_KEY (or SERVICE_ROLE) required");
   }
-  return createClient(url, secret, {
-    auth: { persistSession: false, autoRefreshToken: false, detectSessionInUrl: false },
-  });
+  return createServiceSupabaseClient(url, secret);
 }
 
 /**

@@ -1,5 +1,4 @@
-import { createClient } from "@supabase/supabase-js";
-import { getSupabaseAdmin } from "./supabase.js";
+import { createServiceSupabaseClient, getSupabaseAdmin } from "./supabase.js";
 import {
   getSupabasePublishableKey,
   getSupabaseSecretKey,
@@ -149,9 +148,7 @@ export async function issueSupabaseSessionForEmail(email) {
     console.warn("createUser before session:", createErr.message);
   }
 
-  const authClient = createClient(url, publishable, {
-    auth: { persistSession: false, autoRefreshToken: false, detectSessionInUrl: false },
-  });
+  const authClient = createServiceSupabaseClient(url, publishable);
 
   function sessionFromVerifyData(data) {
     const session = data?.session;
