@@ -57,10 +57,20 @@ export function mountAdminRoutes(app, { requireAuth }) {
         .select("*", { count: "exact", head: true });
       if (countErr) throw countErr;
 
-      const { data: rows, error } = await admin
+      let rows;
+      const { data: rowsWithBan, error: banSelectErr } = await admin
         .from("app_users")
         .select("plan, photo_scans_used, video_scans_used, is_admin, is_banned");
-      if (error) throw error;
+      if (banSelectErr && /is_banned/i.test(String(banSelectErr.message || ""))) {
+        const { data: rowsBasic, error: basicErr } = await admin
+          .from("app_users")
+          .select("plan, photo_scans_used, video_scans_used, is_admin");
+        if (basicErr) throw basicErr;
+        rows = rowsBasic;
+      } else {
+        if (banSelectErr) throw banSelectErr;
+        rows = rowsWithBan;
+      }
 
       let premiumUsers = 0;
       let photoScans = 0;

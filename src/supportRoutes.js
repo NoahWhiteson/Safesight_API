@@ -7,11 +7,14 @@ import {
   presetsForUser,
 } from "./supportAutomations.js";
 import {
-  ensureSupportThread,
-  getSupportThread,
-  reopenThreadIfNeeded,
-  threadToJSON,
-} from "./supportThreadStore.js";
+  insertSupportMessage,
+  isSupportSchemaError,
+  listSupportMessages,
+  safeEnsureSupportThread,
+  safeGetSupportThread,
+  safeReopenThreadIfNeeded,
+} from "./supportDb.js";
+import { threadToJSON } from "./supportThreadStore.js";
 import express from "express";
 
 function messageToJSON(row) {
@@ -26,23 +29,15 @@ function messageToJSON(row) {
   };
 }
 
-async function insertMessage(admin, { userId, senderRole, body }) {
-  await ensureSupportThread(admin, userId);
-  const { data, error } = await admin
-    .from("support_messages")
-    .insert({
-      user_id: userId,
-      sender_role: senderRole,
-      body,
-    })
-    .select("*")
-    .single();
-  if (error) throw error;
-  await admin
-    .from("support_threads")
-    .update({ updated_at: new Date().toISOString() })
-    .eq("user_id", userId);
-  return data;
+function supportDbErrorResponse(res, err) {
+  if (err?.code === "SUPPORT_DB" || isSupportSchemaError(err)) {
+    return res.status(503).json({
+      error: "Support chat isn’t available yet. Please try again later.",
+      code: "SS-SRV-001",
+      detail: err?.message,
+    });
+  }
+  return null;
 }
 
 export function mountSupportRoutes(app, { requireAuth }) {
@@ -57,7 +52,9 @@ export function mountSupportRoutes(app, { requireAuth }) {
       if (!row) {
         return res.status(404).json({ error: "Profile not found" });
       }
-      const thread = (await getSupportThread(admin, userId)) || (await ensureSupportThread(admin, userId));
+      const thread =
+        (await safeGetSupportThread(admin, userId)) ||
+        (await safeEnsureSupportThread(admin, userId));
       return res.json({
         thread: threadToJSON(thread),
         presets: presetsForUser(row),
@@ -65,6 +62,8 @@ export function mountSupportRoutes(app, { requireAuth }) {
       });
     } catch (err) {
       console.error("support context:", err?.message || err);
+      const db = supportDbErrorResponse(res, err);
+      if (db) return db;
       return res.status(502).json({ error: "Could not load support", code: "SS-SRV-001" });
     }
   });
@@ -78,34 +77,31 @@ export function mountSupportRoutes(app, { requireAuth }) {
       const admin = getSupabaseAdmin();
       const since = String(req.query.since || "").trim();
 
-      let query = admin
-        .from("support_messages")
-        .select("*")
-        .eq("user_id", userId)
-        .order("created_at", { ascending: true })
-        .limit(200);
-      if (since) {
-        query = query.gt("created_at", since);
+      const data = await listSupportMessages(admin, userId, { since, limit: 200 });
+
+      try {
+        await admin
+          .from("support_messages")
+          .update({ read_by_user_at: new Date().toISOString() })
+          .eq("user_id", userId)
+          .eq("sender_role", "admin")
+          .is("read_by_user_at", null);
+      } catch {
+        /* ignore */
       }
 
-      const { data, error } = await query;
-      if (error) throw error;
-
-      await admin
-        .from("support_messages")
-        .update({ read_by_user_at: new Date().toISOString() })
-        .eq("user_id", userId)
-        .eq("sender_role", "admin")
-        .is("read_by_user_at", null);
-
-      const thread = (await getSupportThread(admin, userId)) || (await ensureSupportThread(admin, userId));
+      const thread =
+        (await safeGetSupportThread(admin, userId)) ||
+        (await safeEnsureSupportThread(admin, userId));
 
       return res.json({
-        messages: (data || []).map(messageToJSON),
+        messages: data.map(messageToJSON),
         thread: threadToJSON(thread),
       });
     } catch (err) {
       console.error("support messages list:", err?.message || err);
+      const db = supportDbErrorResponse(res, err);
+      if (db) return db;
       return res.status(502).json({ error: "Could not load support chat", code: "SS-SRV-001" });
     }
   });
@@ -130,22 +126,22 @@ export function mountSupportRoutes(app, { requireAuth }) {
         return res.status(400).json({ error: "Unknown preset for your account" });
       }
 
-      await reopenThreadIfNeeded(admin, userId);
+      await safeReopenThreadIfNeeded(admin, userId);
 
-      const userMsg = await insertMessage(admin, {
+      const userMsg = await insertSupportMessage(admin, {
         userId,
         senderRole: "user",
         body: presetUserMessage(presetId),
       });
 
       const systemBody = automatedReply(presetId, row);
-      const systemMsg = await insertMessage(admin, {
+      const systemMsg = await insertSupportMessage(admin, {
         userId,
         senderRole: "system",
         body: systemBody,
       });
 
-      const thread = await getSupportThread(admin, userId);
+      const thread = await safeGetSupportThread(admin, userId);
 
       return res.json({
         messages: [messageToJSON(userMsg), messageToJSON(systemMsg)],
@@ -153,6 +149,8 @@ export function mountSupportRoutes(app, { requireAuth }) {
       });
     } catch (err) {
       console.error("support preset:", err?.message || err);
+      const db = supportDbErrorResponse(res, err);
+      if (db) return db;
       return res.status(502).json({ error: "Could not run preset", code: "SS-SRV-001" });
     }
   });
@@ -169,15 +167,15 @@ export function mountSupportRoutes(app, { requireAuth }) {
       }
 
       const admin = getSupabaseAdmin();
-      await reopenThreadIfNeeded(admin, userId);
+      await safeReopenThreadIfNeeded(admin, userId);
 
-      const data = await insertMessage(admin, {
+      const data = await insertSupportMessage(admin, {
         userId,
         senderRole: "user",
         body,
       });
 
-      const thread = await getSupportThread(admin, userId);
+      const thread = await safeGetSupportThread(admin, userId);
 
       return res.json({
         message: messageToJSON(data),
@@ -185,6 +183,8 @@ export function mountSupportRoutes(app, { requireAuth }) {
       });
     } catch (err) {
       console.error("support message send:", err?.message || err);
+      const db = supportDbErrorResponse(res, err);
+      if (db) return db;
       return res.status(502).json({ error: "Could not send message", code: "SS-SRV-001" });
     }
   });
@@ -198,22 +198,26 @@ export function mountSupportRoutes(app, { requireAuth }) {
       const { admin } = req.adminCtx;
       const statusFilter = String(req.query.status || "all").trim();
 
-      const { data: threadsRows, error: threadErr } = await admin
+      let threadsRows = [];
+      const { data: tr, error: threadErr } = await admin
         .from("support_threads")
         .select("*")
         .order("updated_at", { ascending: false })
         .limit(200);
-      if (threadErr) throw threadErr;
+      if (threadErr && !isSupportSchemaError(threadErr)) throw threadErr;
+      if (tr) threadsRows = tr;
 
-      const { data: recentMsgs, error } = await admin
+      let recentMsgs = [];
+      const { data: msgs, error } = await admin
         .from("support_messages")
         .select("user_id, body, created_at, sender_role")
         .order("created_at", { ascending: false })
         .limit(500);
-      if (error) throw error;
+      if (error && !isSupportSchemaError(error)) throw error;
+      if (msgs) recentMsgs = msgs;
 
       const lastByUser = new Map();
-      for (const row of recentMsgs || []) {
+      for (const row of recentMsgs) {
         if (!lastByUser.has(row.user_id)) {
           lastByUser.set(row.user_id, row);
         }
@@ -226,11 +230,22 @@ export function mountSupportRoutes(app, { requireAuth }) {
 
       let usersById = new Map();
       if (userIds.size) {
-        const { data: users } = await admin
+        let users = [];
+        const { data: u1, error: uErr } = await admin
           .from("app_users")
           .select("id, email, plan, is_banned")
           .in("id", [...userIds]);
-        for (const u of users || []) {
+        if (uErr && isSupportSchemaError(uErr)) {
+          const { data: u2 } = await admin
+            .from("app_users")
+            .select("id, email, plan")
+            .in("id", [...userIds]);
+          users = u2 || [];
+        } else {
+          if (uErr) throw uErr;
+          users = u1 || [];
+        }
+        for (const u of users) {
           usersById.set(u.id, u);
         }
       }
@@ -277,24 +292,23 @@ export function mountSupportRoutes(app, { requireAuth }) {
       const userId = String(req.params.userId || "").trim();
       if (!userId) return res.status(400).json({ error: "Missing user id" });
 
-      const { data, error } = await admin
-        .from("support_messages")
-        .select("*")
-        .eq("user_id", userId)
-        .order("created_at", { ascending: true })
-        .limit(300);
-      if (error) throw error;
+      const data = await listSupportMessages(admin, userId, { limit: 300 });
 
-      await admin
-        .from("support_messages")
-        .update({ read_by_admin_at: new Date().toISOString() })
-        .eq("user_id", userId)
-        .eq("sender_role", "user")
-        .is("read_by_admin_at", null);
+      try {
+        await admin
+          .from("support_messages")
+          .update({ read_by_admin_at: new Date().toISOString() })
+          .eq("user_id", userId)
+          .eq("sender_role", "user")
+          .is("read_by_admin_at", null);
+      } catch {
+        /* ignore */
+      }
 
       const userRow = await getAppUserById(admin, userId);
       const thread =
-        (await getSupportThread(admin, userId)) || (await ensureSupportThread(admin, userId));
+        (await safeGetSupportThread(admin, userId)) ||
+        (await safeEnsureSupportThread(admin, userId));
 
       return res.json({
         messages: (data || []).map(messageToJSON),
@@ -317,7 +331,7 @@ export function mountSupportRoutes(app, { requireAuth }) {
         return res.status(400).json({ error: "status must be open or closed" });
       }
 
-      await ensureSupportThread(admin, userId);
+      await safeEnsureSupportThread(admin, userId);
       const now = new Date().toISOString();
       const patch = {
         status,
@@ -325,23 +339,25 @@ export function mountSupportRoutes(app, { requireAuth }) {
         closed_at: status === "closed" ? now : null,
       };
 
-      const { data, error } = await admin
+      let data = syntheticThreadRow(userId, patch);
+      const { data: updated, error } = await admin
         .from("support_threads")
         .update(patch)
         .eq("user_id", userId)
         .select("*")
         .single();
-      if (error) throw error;
+      if (!error && updated) data = updated;
+      if (error && !isSupportSchemaError(error)) throw error;
 
       if (status === "closed") {
-        await insertMessage(admin, {
+        await insertSupportMessage(admin, {
           userId,
           senderRole: "system",
           body:
             "This support request was closed by our team. Tap a topic above or send a message to reopen.",
         });
       } else {
-        await insertMessage(admin, {
+        await insertSupportMessage(admin, {
           userId,
           senderRole: "system",
           body: "Support request reopened — an agent can assist you here.",
@@ -365,15 +381,15 @@ export function mountSupportRoutes(app, { requireAuth }) {
         return res.status(400).json({ error: "Message must be 1–4000 characters." });
       }
 
-      await reopenThreadIfNeeded(admin, userId);
+      await safeReopenThreadIfNeeded(admin, userId);
 
-      const data = await insertMessage(admin, {
+      const data = await insertSupportMessage(admin, {
         userId,
         senderRole: "admin",
         body,
       });
 
-      const thread = await getSupportThread(admin, userId);
+      const thread = await safeGetSupportThread(admin, userId);
 
       return res.json({
         message: messageToJSON(data),
@@ -386,4 +402,13 @@ export function mountSupportRoutes(app, { requireAuth }) {
   });
 
   app.use("/v1/admin/support", adminRouter);
+}
+
+function syntheticThreadRow(userId, patch) {
+  return {
+    user_id: userId,
+    status: patch.status,
+    closed_at: patch.closed_at,
+    updated_at: patch.updated_at,
+  };
 }

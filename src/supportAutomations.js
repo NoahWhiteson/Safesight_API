@@ -32,16 +32,16 @@ export function automatedReply(presetId, row) {
       return [
         `Account status (automated)`,
         `Email: ${profile.email || "—"}`,
-        `Plan: ${String(profile.plan || "free").toUpperCase()}${profile.is_admin ? " · Admin" : ""}`,
+        `Plan: ${String(profile.plan || "free").toUpperCase()}`,
         profile.is_banned
-          ? `Status: SUSPENDED${profile.ban_reason ? ` — ${profile.ban_reason}` : ""}`
+          ? `Status: Suspended${profile.ban_reason ? ` — ${profile.ban_reason}` : ""}`
           : "Status: Active — scans allowed if you have quota.",
         `Photo: ${photoUsed} used · ${photoRem} remaining (${limits.photo_quota_limit}/month)`,
         `Video: ${videoUsed} used · ${videoRem} remaining (${limits.video_quota_limit}/month)`,
         `Quota month: ${row.quota_month_key || "current"}`,
         profile.is_banned
-          ? "Code SS-ACC-001 — only an admin can lift a suspension."
-          : "Need more detail? Send a message below and an agent will follow up.",
+          ? "Code SS-ACC-001 — contact Support to appeal."
+          : "Need more detail? Send a message below and our team will follow up.",
       ].join("\n");
 
     case "photo_quota":
@@ -74,20 +74,18 @@ export function automatedReply(presetId, row) {
 
     case "premium_help":
       return [
-        "Premium sync (automated)",
-        `Server plan: ${profile.plan}`,
-        `RevenueCat premium on device may differ until sync completes.`,
-        "Try: You tab → pull to refresh → Restore purchases → log out and back in once.",
-        "Codes SS-PRM-001, SS-PRM-003 — search them under Support.",
-        "Still stuck? Message below with your Apple ID email used for purchase.",
+        "Premium help (automated)",
+        `Your Safesight plan on file: ${String(profile.plan || "free").toUpperCase()}.`,
+        "Try: You tab → pull to refresh → Restore purchases → log out and sign in once with the same email.",
+        "Look up SS-PRM-001 and SS-PRM-002 under Support → Error codes.",
+        "Still stuck? Reply here with the Apple ID email you use for subscriptions.",
       ].join("\n");
 
     case "session_help":
       return [
         "Sign-in help (automated)",
-        "Safesight uses email codes — sessions expire about every hour.",
-        "The app refreshes automatically when the API is up to date.",
-        "If you see Invalid JWT: pull to refresh on You, or log out and request a new code.",
+        "Safesight uses email codes. Sessions expire about every hour; the app usually refreshes for you.",
+        "If you see session or sign-in errors: pull to refresh on You, or log out and request a new code.",
         "Code SS-AUTH-001",
       ].join("\n");
 
@@ -98,7 +96,7 @@ export function automatedReply(presetId, row) {
           ? profile.ban_reason || "Your account is suspended from scanning."
           : "Your account is not suspended on our records.",
         "Suspensions block photo and video scans only — you can still sign in.",
-        "Reply below with any context; an admin will review this thread.",
+        "Reply below with any context; our team will review this thread.",
         "Code SS-ACC-001",
       ].join("\n");
 
