@@ -1,3 +1,4 @@
+import "./nodeCryptoPolyfill.js";
 import "dotenv/config";
 import cors from "cors";
 import express from "express";
@@ -12,7 +13,7 @@ import { routeVideoWithGemini } from "./routeVideo.js";
 import { mountAuthOtpRoutes } from "./authOtp.js";
 import { getOtpStoreStatus, initOtpStore, refreshOtpDatabaseProbe } from "./otpStore.js";
 import { isResendConfigured } from "./resendOtpEmail.js";
-import { isSupabaseConfigured, getSupabaseAdmin } from "./supabase.js";
+import { AUTH_VERIFIER, isSupabaseConfigured, getSupabaseAdmin } from "./supabase.js";
 import {
   assertPhotoQuota,
   assertVideoQuota,
@@ -92,6 +93,7 @@ app.get("/health", (_req, res) => {
       authRequired: Boolean(API_SECRET),
       supabase: isSupabaseConfigured(),
       resend: isResendConfigured(),
+      authVerifier: AUTH_VERIFIER,
       otpStore: getOtpStoreStatus(),
     });
   });

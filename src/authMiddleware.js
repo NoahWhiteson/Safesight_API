@@ -1,3 +1,4 @@
+import "./nodeCryptoPolyfill.js";
 import crypto from "crypto";
 import { requireSupabaseUser } from "./supabase.js";
 

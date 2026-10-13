@@ -1,8 +1,14 @@
-import { createSupabaseContext } from "@supabase/server";
+import "./nodeCryptoPolyfill.js";
 import { createClient } from "@supabase/supabase-js";
-import { resolveEnv } from "@supabase/server/core";
 import ws from "ws";
-import { getSupabaseSecretKey, getSupabaseUrl, hasSupabaseAdminConfig } from "./supabaseKeys.js";
+import {
+  getSupabasePublishableKey,
+  getSupabaseSecretKey,
+  getSupabaseUrl,
+  hasSupabaseAdminConfig,
+} from "./supabaseKeys.js";
+
+export const AUTH_VERIFIER = "auth-v1-user-fetch";
 
 /** Node 18–21: supabase-js needs an explicit WebSocket transport for Realtime init. */
 export function createServiceSupabaseClient(url, key) {
@@ -13,8 +19,7 @@ export function createServiceSupabaseClient(url, key) {
 }
 
 export function isSupabaseConfigured() {
-  const { data } = resolveEnv();
-  return Boolean(data?.url) && hasSupabaseAdminConfig();
+  return Boolean(getSupabaseUrl() && hasSupabaseAdminConfig());
 }
 
 /** Admin client for server-only DB (bypasses RLS). */
@@ -47,22 +52,83 @@ export function webRequestFromExpress(req) {
 }
 
 /**
- * Verify Supabase user JWT (Authorization: Bearer <access_token>).
- * Returns SupabaseContext or sends 401 via res.
+ * Verify Supabase user JWT via Auth API (avoids JWKS/crypto issues on Node 18).
+ * Returns { userClaims } or sends 401 via res.
  */
-export async function requireSupabaseUser(req, res) {
-  const request = webRequestFromExpress(req);
-  const { data: ctx, error } = await createSupabaseContext(request, {
-    auth: "user",
-  });
+async function readJsonSafe(res) {
+  const text = await res.text();
+  if (!text) return {};
+  try {
+    return JSON.parse(text);
+  } catch {
+    return { message: text };
+  }
+}
 
-  if (error) {
-    res.status(error.status || 401).json({
-      error: error.message,
-      code: error.code,
+/** Validates user JWT via GoTrue HTTP API (no JWKS / @supabase/server). */
+export async function verifySupabaseUserJwt(accessToken) {
+  const url = getSupabaseUrl();
+  const apikey = getSupabasePublishableKey() || getSupabaseSecretKey();
+  if (!url || !apikey) {
+    return { ok: false, status: 503, error: "Supabase URL/keys not configured on server" };
+  }
+
+  let response;
+  try {
+    response = await fetch(`${url}/auth/v1/user`, {
+      method: "GET",
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+        apikey,
+      },
+    });
+  } catch (err) {
+    return { ok: false, status: 502, error: err?.message || "Could not reach Supabase Auth" };
+  }
+
+  const body = await readJsonSafe(response);
+  if (!response.ok) {
+    return {
+      ok: false,
+      status: response.status,
+      error: body?.msg || body?.message || body?.error_description || `Auth failed (${response.status})`,
+      code: body?.code || body?.error_code,
+    };
+  }
+
+  const user = body?.user ?? body;
+  if (!user?.id) {
+    return { ok: false, status: 401, error: "Invalid session (no user in Auth response)" };
+  }
+
+  return {
+    ok: true,
+    userClaims: {
+      id: user.id,
+      email: user.email ?? "",
+      role: user.role ?? "authenticated",
+    },
+  };
+}
+
+export async function requireSupabaseUser(req, res) {
+  const auth = req.get("authorization") || "";
+  const bearer = auth.match(/^Bearer\s+(.+)$/i)?.[1]?.trim() || "";
+  if (!bearer) {
+    res.status(401).json({ error: "Missing bearer token" });
+    return null;
+  }
+
+  const verified = await verifySupabaseUserJwt(bearer);
+  if (!verified.ok) {
+    const status = verified.status === 503 ? 503 : verified.status === 502 ? 502 : 401;
+    res.status(status).json({
+      error: verified.error || "Invalid or expired session",
+      code: verified.code,
+      auth_verifier: AUTH_VERIFIER,
     });
     return null;
   }
 
-  return ctx;
+  return { userClaims: verified.userClaims };
 }
