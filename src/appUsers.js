@@ -89,7 +89,11 @@ export async function ensureAppUser(admin, { userId, email }) {
     is_admin: false,
   };
 
-  const { data, error } = await admin.from("app_users").insert(insertRow).select("*").single();
+  let { data, error } = await admin.from("app_users").insert(insertRow).select("*").single();
+  if (error && /photo_quota_limit|video_quota_limit|schema cache/i.test(error.message || "")) {
+    const { photo_quota_limit, video_quota_limit, ...legacyRow } = insertRow;
+    ({ data, error } = await admin.from("app_users").insert(legacyRow).select("*").single());
+  }
   if (error) {
     throw error;
   }

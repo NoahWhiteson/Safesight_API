@@ -12,6 +12,8 @@ create table if not exists public.app_users (
   scan_aggressiveness double precision not null default 0.55,
   onboarding_complete boolean not null default false,
   is_admin boolean not null default false,
+  photo_quota_limit integer not null default 2,
+  video_quota_limit integer not null default 0,
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now()
 );
