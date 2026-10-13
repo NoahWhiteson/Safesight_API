@@ -16,3 +16,15 @@ export function effectiveVideoLimit(row) {
   if (Number.isFinite(n) && n >= 0) return n;
   return defaultLimitsForPlan(row?.plan).video_quota_limit;
 }
+
+/** Premium rows with stale free-tier columns still show premium caps. */
+export function resolvedQuotaLimits(row) {
+  let photo = effectivePhotoLimit(row);
+  let video = effectiveVideoLimit(row);
+  if (row?.plan === "premium") {
+    const def = defaultLimitsForPlan("premium");
+    if (photo < 10) photo = def.photo_quota_limit;
+    if (video < 1) video = def.video_quota_limit;
+  }
+  return { photo_quota_limit: photo, video_quota_limit: video };
+}

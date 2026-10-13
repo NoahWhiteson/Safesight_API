@@ -1,5 +1,6 @@
 import { getSupabaseAdmin } from "./supabase.js";
-import { defaultLimitsForPlan, effectivePhotoLimit, effectiveVideoLimit } from "./userQuotaLimits.js";
+import { defaultLimitsForPlan, resolvedQuotaLimits } from "./userQuotaLimits.js";
+import { healPremiumQuotaLimits } from "./quotaHeal.js";
 
 function currentQuotaMonthKey() {
   const now = new Date();
@@ -10,8 +11,7 @@ function currentQuotaMonthKey() {
 
 export function profileToJSON(row) {
   if (!row) return null;
-  const photoLimit = effectivePhotoLimit(row);
-  const videoLimit = effectiveVideoLimit(row);
+  const { photo_quota_limit: photoLimit, video_quota_limit: videoLimit } = resolvedQuotaLimits(row);
   const photoUsed = Number(row.photo_scans_used ?? 0);
   const videoUsed = Number(row.video_scans_used ?? 0);
   return {
@@ -31,6 +31,7 @@ export function profileToJSON(row) {
     video_quota_limit: videoLimit,
     photo_scans_remaining: Math.max(0, photoLimit - photoUsed),
     video_scans_remaining: Math.max(0, videoLimit - videoUsed),
+    avatar_url: row.avatar_url || null,
   };
 }
 
@@ -104,7 +105,8 @@ export async function getAppUserById(admin, userId) {
   const { data, error } = await admin.from("app_users").select("*").eq("id", userId).maybeSingle();
   if (error) throw error;
   if (!data) return null;
-  return maybeRollQuotaMonth(admin, data);
+  const rolled = await maybeRollQuotaMonth(admin, data);
+  return healPremiumQuotaLimits(admin, rolled);
 }
 
 export async function updateAppUserProfile(admin, userId, patch) {
@@ -209,18 +211,22 @@ export function mountAppUserRoutes(app, { requireAuth }) {
 
       const userId = req.supabaseCtx.userClaims.id;
       const premium = Boolean(req.body?.premium);
-      const plan = premium ? "premium" : "free";
-      const limits = defaultLimitsForPlan(plan);
       const admin = getSupabaseAdmin();
       await ensureAppUser(admin, {
         userId,
         email: req.supabaseCtx.userClaims.email || "",
       });
 
+      if (!premium) {
+        const row = await getAppUserById(admin, userId);
+        return res.json({ profile: profileToJSON(row) });
+      }
+
+      const limits = defaultLimitsForPlan("premium");
       const { data, error } = await admin
         .from("app_users")
         .update({
-          plan,
+          plan: "premium",
           photo_quota_limit: limits.photo_quota_limit,
           video_quota_limit: limits.video_quota_limit,
           updated_at: new Date().toISOString(),

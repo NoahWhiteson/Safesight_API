@@ -1,5 +1,5 @@
 import { ensureAppUser, getAppUserById, profileToJSON } from "./appUsers.js";
-import { effectivePhotoLimit, effectiveVideoLimit } from "./userQuotaLimits.js";
+import { resolvedQuotaLimits } from "./userQuotaLimits.js";
 
 export function enrichProfile(row) {
   return profileToJSON(row);
@@ -15,7 +15,7 @@ async function loadUserRow(admin, userId, email) {
 
 export async function assertPhotoQuota(admin, userId, email) {
   const row = await loadUserRow(admin, userId, email);
-  const limit = effectivePhotoLimit(row);
+  const limit = resolvedQuotaLimits(row).photo_quota_limit;
   const used = Number(row.photo_scans_used ?? 0);
   if (used >= limit) {
     return {
@@ -30,7 +30,7 @@ export async function assertPhotoQuota(admin, userId, email) {
 
 export async function assertVideoQuota(admin, userId, email) {
   const row = await loadUserRow(admin, userId, email);
-  const limit = effectiveVideoLimit(row);
+  const limit = resolvedQuotaLimits(row).video_quota_limit;
   if (limit <= 0) {
     return {
       ok: false,
@@ -71,7 +71,7 @@ async function incrementColumn(admin, userId, column, expectedUsed) {
 export async function consumePhotoScan(admin, userId, email) {
   for (let attempt = 0; attempt < 3; attempt += 1) {
     const row = await loadUserRow(admin, userId, email);
-    const limit = effectivePhotoLimit(row);
+    const limit = resolvedQuotaLimits(row).photo_quota_limit;
     const used = Number(row.photo_scans_used ?? 0);
     if (used >= limit) {
       return {
@@ -98,7 +98,7 @@ export async function consumePhotoScan(admin, userId, email) {
 export async function consumeVideoScan(admin, userId, email) {
   for (let attempt = 0; attempt < 3; attempt += 1) {
     const row = await loadUserRow(admin, userId, email);
-    const limit = effectiveVideoLimit(row);
+    const limit = resolvedQuotaLimits(row).video_quota_limit;
     const used = Number(row.video_scans_used ?? 0);
     if (limit <= 0) {
       return {

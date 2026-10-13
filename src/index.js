@@ -3,7 +3,9 @@ import "dotenv/config";
 import cors from "cors";
 import express from "express";
 import { mountAdminRoutes } from "./adminRoutes.js";
+import { mountAppSettingsRoutes } from "./appSettings.js";
 import { mountAppUserRoutes } from "./appUsers.js";
+import { mountAvatarRoutes } from "./avatarRoutes.js";
 import multer from "multer";
 import path from "path";
 import { fileURLToPath } from "url";
@@ -43,6 +45,18 @@ const upload = multer({
 const uploadVideoRoute = multer({
   storage: multer.memoryStorage(),
   limits: { fileSize: 512 * 1024, files: 24 },
+});
+
+const uploadAvatar = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 10 * 1024 * 1024, files: 1 },
+  fileFilter: (_req, file, cb) => {
+    if (!file.mimetype || !/^image\//i.test(file.mimetype)) {
+      cb(new Error("Image file required"));
+      return;
+    }
+    cb(null, true);
+  },
 });
 
 const app = express();
@@ -102,6 +116,8 @@ app.get("/health", (_req, res) => {
 mountAuthOtpRoutes(app, { clientIp });
 mountAppUserRoutes(app, { requireAuth });
 mountAdminRoutes(app, { requireAuth });
+mountAppSettingsRoutes(app, { requireAuth });
+mountAvatarRoutes(app, { requireAuth, uploadAvatar });
 
 /** Product demo MP4 at /demovideo (and /demovideo.mp4). */
 function sendDemoVideo(req, res) {
