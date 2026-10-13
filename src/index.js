@@ -13,6 +13,7 @@ import { requireAppAuth } from "./authMiddleware.js";
 import { analyzeWithGemini } from "./gemini.js";
 import { routeVideoWithGemini } from "./routeVideo.js";
 import { mountAuthOtpRoutes } from "./authOtp.js";
+import { mountSupportRoutes } from "./supportRoutes.js";
 import { getOtpStoreStatus, initOtpStore, refreshOtpDatabaseProbe } from "./otpStore.js";
 import { isResendConfigured } from "./resendOtpEmail.js";
 import { AUTH_VERIFIER, isSupabaseConfigured, getSupabaseAdmin } from "./supabase.js";
@@ -121,6 +122,7 @@ mountAppUserRoutes(app, { requireAuth });
 mountAdminRoutes(app, { requireAuth });
 mountAppSettingsRoutes(app, { requireAuth });
 mountAvatarRoutes(app, { requireAuth, uploadAvatar });
+mountSupportRoutes(app, { requireAuth });
 
 /** Product demo MP4 at /demovideo (and /demovideo.mp4). */
 function sendDemoVideo(req, res) {
@@ -165,6 +167,7 @@ app.post(
       if (!consumed.ok) {
         return res.status(consumed.status || 429).json({
           error: consumed.error,
+          code: consumed.code,
           profile: consumed.profile,
         });
       }
@@ -242,6 +245,7 @@ app.post(
         if (!consumed.ok) {
           return res.status(consumed.status || 429).json({
             error: consumed.error,
+            code: consumed.code,
             profile: consumed.profile,
           });
         }

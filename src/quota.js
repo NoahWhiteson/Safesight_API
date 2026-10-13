@@ -6,6 +6,7 @@ import {
   bannedUserResponse,
 } from "./appUsers.js";
 import { resolvedQuotaLimits } from "./userQuotaLimits.js";
+import { SupportCodes } from "./supportErrorCodes.js";
 
 export function enrichProfile(row) {
   return profileToJSON(row);
@@ -28,6 +29,7 @@ export async function assertPhotoQuota(admin, userId, email) {
     return {
       ok: false,
       status: 429,
+      code: SupportCodes.QUOTA_PHOTO_EXCEEDED,
       error: "Photo scan quota exceeded for this period.",
       profile: enrichProfile(row),
     };
@@ -43,6 +45,7 @@ export async function assertVideoQuota(admin, userId, email) {
     return {
       ok: false,
       status: 403,
+      code: SupportCodes.QUOTA_VIDEO_PREMIUM_REQUIRED,
       error: "Video scans require Premium.",
       profile: enrichProfile(row),
     };
@@ -52,6 +55,7 @@ export async function assertVideoQuota(admin, userId, email) {
     return {
       ok: false,
       status: 429,
+      code: SupportCodes.QUOTA_VIDEO_EXCEEDED,
       error: "Video scan quota exceeded for this period.",
       profile: enrichProfile(row),
     };
@@ -86,6 +90,7 @@ export async function consumePhotoScan(admin, userId, email) {
       return {
         ok: false,
         status: 429,
+        code: SupportCodes.QUOTA_PHOTO_EXCEEDED,
         error: "Photo scan quota exceeded for this period.",
         profile: enrichProfile(row),
       };
@@ -114,6 +119,7 @@ export async function consumeVideoScan(admin, userId, email) {
       return {
         ok: false,
         status: 403,
+        code: SupportCodes.QUOTA_VIDEO_PREMIUM_REQUIRED,
         error: "Video scans require Premium.",
         profile: enrichProfile(row),
       };
@@ -122,6 +128,7 @@ export async function consumeVideoScan(admin, userId, email) {
       return {
         ok: false,
         status: 429,
+        code: SupportCodes.QUOTA_VIDEO_EXCEEDED,
         error: "Video scan quota exceeded for this period.",
         profile: enrichProfile(row),
       };

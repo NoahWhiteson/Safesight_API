@@ -47,6 +47,7 @@ export function bannedUserResponse(row) {
   return {
     ok: false,
     status: 403,
+    code: "SS-ACC-001",
     error:
       row?.ban_reason?.trim() ||
       "Your account has been suspended. Contact support if you think this is a mistake.",
